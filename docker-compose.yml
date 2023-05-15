@@ -182,8 +182,8 @@ services:
     environment:
       <<: *default-tz-puid-pgid
       TRANSMISSION_WEB_HOME: #optional
-      USER: "smarthome2"
-      PASS: "Tj5579!!"
+      USER: "username here"
+      PASS: "password. here"
       WHITELIST: #optional
       PEERPORT: #optional
       HOST_WHITELIST: #optional
