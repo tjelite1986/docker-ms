@@ -1,0 +1,308 @@
+version: "3.9"
+
+networks:
+  default:
+    driver: bridge
+  npm_proxy:
+    name: npm_proxy
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.68.0/24
+
+x-environment: &default-tz-puid-pgid
+  TZ: $TZ
+  PUID: $PUID
+  PGID: $PGID
+
+x-common-keys-core: &common-keys-core
+  networks:
+    - npm_proxy
+  security_opt:
+    - no-new-privileges:true
+  restart: always
+
+x-common-keys-apps: &common-keys-apps
+  networks:
+    - npm_proxy
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+x-common-keys-media: &common-keys-media
+  networks:
+    - npm_proxy
+  security_opt:
+    - no-new-privileges:true
+  restart: "no"
+
+
+####
+services:
+# Portainer - WebUI for Containers
+  portainer:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    container_name: portainer
+    image: portainer/portainer-ce:latest
+    command: -H unix:///var/run/docker.sock
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.201 # You can specify a static IP
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Use Docker Socket Proxy and commen> - 
+      - $DOCKERDIR/appdata/portainer/data:/data # Change to local directory if you want t>
+    environment:
+      - TZ=$TZ
+####
+# Nginx Proxy Manager - Reverse Proxy with LetsEncrypt
+  npm:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    container_name: nginx-proxy-manager
+    image: jc21/nginx-proxy-manager:2.9.22
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.202 # You can specify a static IP
+    ports:
+      - "80:80" # Public HTTP Port. Port Forwarding on Router is On
+      - "443:443" # Public HTTPS Port. Port Forwarding on Router is ON.
+      - "81:81" # Admin Web Port.
+    environment:
+      <<: *default-tz-puid-pgid
+      DB_SQLITE_FILE: "/data/database.sqlite"
+      DISABLE_IPV6: "true"
+    volumes:
+      - $DOCKERDIR/appdata/npm/config:/config
+      - $DOCKERDIR/appdata/npm/letsencrypt:/etc/letsencrypt
+      - $DOCKERDIR/appdata/npm/data:/data
+####
+  web:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    container_name: nginx-web
+    image: nginx:latest
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.203 # You can specify a static IP
+    ports:
+      - "82:82"
+    volumes:
+      - $DOCKERDIR/appdata/nginxweb/src:/usr/share/nginx/html
+    links:
+      - php
+  php:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    image: php:7-fpm
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.204 # You can specify a static IP
+    volumes:
+      - $DOCKERDIR/appdata/php/src:/usr/local/etc/php
+###
+  code-server:
+    <<: *common-keys-core # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/code-server:latest
+    container_name: code-server
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.205 # You can specify a static IP
+    ports:
+      - "8443:8443"
+    environment:
+      <<: *default-tz-puid-pgid
+      PASSWORD: "password" #optional 
+     # - HASHED_PASSWORD= #optional
+     # - SUDO_PASSWORD=password #optional
+     # - SUDO_PASSWORD_HASH= #optional
+     # PROXY_DOMAIN: "code.flexnet.work" #optional
+     #  DEFAULT_WORKSPACE: "$ä/workspace" #optional
+     #  DEFAULT_WORKSPACE: "/home/smarthome2/ms"
+    volumes:
+      - $DOCKERDIR/appdata/codeserver/config:/config
+      - $DOCKERDIR:/docker
+####
+# Prowlarr - Indexer Proxy
+  prowlarr:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: ghcr.io/linuxserver/prowlarr:develop
+    container_name: prowlarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.206
+    ports:
+      - "9696:9696"
+    volumes:
+      - $DOCKERDIR/appdata/prowlarr:/config
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+# Bazarr - Subtitle Management
+  bazarr:
+    <<: *common-keys-media # See EXTENSION FIELDS a>
+    image: lscr.io/linuxserver/bazarr
+    container_name: bazarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.207
+    ports:
+      - "6767:6767"
+    volumes:
+      - $DOCKERDIR/appdata/bazarr:/config
+      - $DATADIR:/storage
+    environment:
+      <<: *default-tz-puid-pgid
+# qBittorrent - Torrent downloader without VPN
+  qbittorrent:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.208
+    ports:
+      - "8080:8080"
+    volumes:
+      - $DOCKERDIR/appdata/qbittorrent:/config
+      - $DATADIR/downloads:/downloads
+    environment:
+      <<: *default-tz-puid-pgid
+      UMASK_SET: 002
+# Transmission - Seeding Client
+  transmission:
+    <<: *common-keys-apps # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: transmission
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.209
+    ports:
+      - "9091:9091"
+      - "51413:51413"
+      - "51413:51413/udp"
+    environment:
+      <<: *default-tz-puid-pgid
+      TRANSMISSION_WEB_HOME: #optional
+      USER: "smarthome2"
+      PASS: "Tj5579!!"
+      WHITELIST: #optional
+      PEERPORT: #optional
+      HOST_WHITELIST: #optional
+    volumes:
+      - $DOCKERDIR/appdata/transmission:/config
+      - $DATADIR/seeding:/downloads
+# Radarr - Movie management
+  radarr:
+    <<: *common-keys-media # See EXTENSION FIELDS at the top
+    image: lscr.io/linuxserver/radarr:nightly # latest was causing "Error parsing column 45"
+    container_name: radarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.210
+    ports:
+      - "7878:7878"
+    volumes:
+      - $DOCKERDIR/appdata/radarr:/config
+      - $DATADIR/downloads:/downloads
+      - $DATADIR:/storage
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+# Sonarr - TV Shows management
+  sonarr:
+    <<: *common-keys-media # See EXTENSION FIELDS at the >
+    image: lscr.io/linuxserver/sonarr
+    container_name: sonarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.211
+    ports:
+      - "8989:8989"
+    volumes:
+      - $DOCKERDIR/appdata/sonarr:/config
+      - $DATADIR/downloads:/downloads
+      - $DATADIR:/storage
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+# Whisparr - Porn management
+  whisparr:
+    <<: *common-keys-media # See EXTENSION FIELDS at the
+    image: cr.hotio.dev/hotio/whisparr
+    container_name: whisparr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.212
+    ports:
+      - "6969:6969"
+    volumes:
+      - $DOCKERDIR/appdata/whisparr:/config
+      - $DATADIR/downloads:/downloads
+      - $DATADIR:/storage
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+# Readarr - Book management
+  readarr:
+    <<: *common-keys-media # See EXTENSION FIELDS at the >
+    image: linuxserver/readarr:develop
+    container_name: readarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.213
+    ports:
+      - "8787:8787"
+    volumes:
+      - $DOCKERDIR/appdata/readar:/config
+      - $DATADIR/downloads:/downloads
+      - $DATADIR:/storage
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+     <<: *default-tz-puid-pgid
+# Lidarr - music management
+#  lidarr:
+#    <<: *common-keys-media # See EXTENSION FIELDS at the >
+#    image: lscr.io/linuxserver/lidarr:latest
+#    container_name: lidarr
+#    networks:
+#      npm_proxy:
+#        ipv4_address: 192.168.68.214
+#    ports:
+#      - "8686:8686"
+#    volumes:
+#      - $DOCKERDIR/appdata/lidarr:/config
+#      - $DATADIR/downloads:/downloads
+#      - $DATADIR:/storage
+#      - "/etc/localtime:/etc/localtime:ro"
+#    environment:
+#      <<: *default-tz-puid-pgid
+# Navidrom - Music management
+#  navidrome:
+#    <<: *common-keys-media # See EXTENSION FIELDS>
+#    image: deluan/navidrome:develop
+#    <<: *default-tz-puid-pgid
+#    container_name: navidrome
+#    networks:
+#      npm_proxy:
+#        ipv4_address: 192.168.68.215
+#    ports:
+#      - "4533:4533"
+#    volumes:
+#      - $DOCKERDIR/appdata/navidrome:/config
+#      - $DATADIR:/storage/media/music:/music
+#    environment:
+# Lidarr - music management
+  lidarr-deemix:
+    <<: *common-keys-apps
+    image: youegraillot/lidarr-on-steroids
+    container_name: lidarr-deemix
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.68.216
+    ports:
+      - "8686:8686"
+      - "6595:6595"
+    volumes:
+      - $DOCKERDIR/appdata/lidarr-deemix/config:/config
+      - $DOCKERDIR/appdata/lidarr-deemix/config_deemix:/config_deemix
+      - $DATADIR/downloads:/downloads
+      - $DATADIR/media/music:/music
